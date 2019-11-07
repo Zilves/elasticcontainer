@@ -1,0 +1,14 @@
+[Manager]
+global_hostname = localhost
+global_ip = 127.0.0.1
+global_receive_port = 8500
+default_send_port = 8600
+
+[Database]
+hostname = localhost
+database = cloudbase2
+user = userdb
+password = bdresu
+
+[Container]
+type = DOCKER

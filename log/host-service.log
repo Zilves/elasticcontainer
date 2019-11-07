@@ -1,0 +1,4 @@
+07/11/2019 17:25:07 INFO:Starting Monitor Process
+07/11/2019 17:25:07 INFO:Starting Request Receiver Process
+07/11/2019 17:25:07 INFO:Starting Container Manager Process
+07/11/2019 17:25:07 ERROR:Monitor error: 'Manager'

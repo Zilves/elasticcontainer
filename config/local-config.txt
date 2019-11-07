@@ -1,0 +1,25 @@
+[Manager]
+global_hostname = localhost
+global_ip = 127.0.0.1
+global_send_port = 8500
+local_receive_port = 8600
+
+[Localbase]
+hostname = localhost
+database = localbase
+user = userdb
+password = bdresu
+
+[Template]
+type = oci
+path = /opt/templates
+
+[Reserve]
+cpu_cores = 1
+memory = 2147483648
+
+[Checkpoint]
+path = /tmp
+
+[Container]
+type = LXC
