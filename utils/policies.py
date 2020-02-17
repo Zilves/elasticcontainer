@@ -1,21 +1,21 @@
 import logging
 import mmap
 import psutil
-from utils import database
-from utils import functions
-from datetime import datetime
+import database
+import functions
+import datetime
 from classes.host import Host
 from configparser import ConfigParser
 
 
 parser = ConfigParser()
-parser.read('../config/local-config.txt')
+parser.read('./config/local-config.txt')
 
 if parser['Container']['type'] == 'DOCKER':
-	from ..classes.container import ContainerDocker as Container
+	from classes.container import ContainerDocker as Container
 
 elif parser['Container']['type'] == 'LXC':
-	from ..classes.container import ContainerLXC as Container
+	from classes.container import ContainerLXC as Container
 
 
 # ---------- Global Scheduling Policies ----------

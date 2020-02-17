@@ -6,7 +6,7 @@ from configparser import ConfigParser
 
 
 config = ConfigParser()
-config.read('../config/global-config.txt')
+config.read('./config/global-config.txt')
 
 
 # Request Functions

@@ -1,17 +1,17 @@
 import logging
-from utils import database
-from utils import communication
+import database
+import communication
 from configparser import ConfigParser
 
 
 parser = ConfigParser()
-parser.read('../config/global-config.txt')
+parser.read('./config/global-config.txt')
 
 if parser['Container']['type'] == 'DOCKER':
-	from ..classes.container import ContainerDocker as Container
+	from classes.container import ContainerDocker as Container
 
 elif parser['Container']['type'] == 'LXC':
-	from ..classes.container import ContainerLXC as Container
+	from classes.container import ContainerLXC as Container
 
 
 # ---------- Escalonador Base para Envio de Requisições ----------

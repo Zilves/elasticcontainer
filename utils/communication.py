@@ -11,7 +11,7 @@ from configparser import ConfigParser
 
 def send_monitor_data(host):
 	config = ConfigParser()
-	config.read('./project/config/local-config.txt')
+	config.read('./config/local-config.txt')
 	conn_address = (config['Manager']['global_ip'], int(config['Manager']['global_send_port']))
 
 	serial_host = dill.dumps(host)
@@ -34,7 +34,7 @@ def send_monitor_data(host):
 
 def receive_monitor_data():
 	config = ConfigParser()
-	config.read('./project/config/global-config.txt')
+	config.read('./config/global-config.txt')
 	#conn_address = (config['Manager']['ip'], int(config['Manager']['port']))
 
 	data = b''
@@ -73,7 +73,7 @@ def receive_monitor_data():
 #def send_container_request(request, address):
 def send_container_request(request, hostname):
 	config = ConfigParser()
-	config.read('./project/config/global-config.txt')
+	config.read('./config/global-config.txt')
 	address = (hostname, int(config['Manager']['default_send_port']))
 
 	# print('Request: ', request)
@@ -96,7 +96,7 @@ def send_container_request(request, hostname):
 
 def receive_container_request():
 	config = ConfigParser()
-	config.read('./project/config/local-config.txt')
+	config.read('./config/local-config.txt')
 
 	data = b''
 	request = None

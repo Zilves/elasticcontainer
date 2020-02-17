@@ -297,7 +297,7 @@ class ContainerLXC(Container):
 		container = lxc.Container(self.name)
 
 		config = ConfigParser()
-		config.read('./project/config/local-config.txt')
+		config.read('./config/local-config.txt')
 		template_type = config['Template']['type']
 		template_path = config['Template']['path']
 

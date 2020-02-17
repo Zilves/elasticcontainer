@@ -15,7 +15,7 @@ class Host:
 
 	def __init__(self):
 		config = ConfigParser()
-		config.read('./project/config/local-config.txt')
+		config.read('./config/local-config.txt')
 
 		self.hostname = socket.gethostname()
 		self.memory_reservation = int(config['Reserve']['memory'])
