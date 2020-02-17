@@ -1,12 +1,12 @@
 import logging
-from . import database
-from . import communication
+from utils import database
+from utils import communication
 from classes.container import Container
 from configparser import ConfigParser
 
 
 config = ConfigParser()
-config.read('./config/global-config.txt')
+config.read('../config/global-config.txt')
 
 
 # Request Functions

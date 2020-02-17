@@ -92,6 +92,7 @@ class Container:
 	def __repr__(self):
 		return self.name + ' ' + self.state
 
+
 	def printResume(self):
 		print('Container:')
 		print('Name: ', self.name)
@@ -99,6 +100,7 @@ class Container:
 		print('Command: ', self.command)
 		print('Request Memory (Initial Limit): ', self.request_mem)
 		print('Number of Request CPU: ', self.request_cpus)
+
 
 	# Function to calculate the running time from a container
 
@@ -144,10 +146,16 @@ class Container:
 		result = int(self.mem_stats['rss']) + int(self.mem_stats['cache'])
 		return result
 
+
 	def getUsedMemory2(self):
 		result = int(self.mem_stats['rss']) + int(self.mem_stats['cache']) + int(self.mem_stats['swap'])
 		return result
 
+	def getMemoryLimit(self):
+		return self.mem_limit
+
+	def getSwapLimit(self):
+		return self.mem_swap_limit
 
 	# Function to calculate the memory threshold of a Container
 	# The threshold is a relationship between the memory usage and the memory limit of a Container, in percentage
@@ -160,11 +168,38 @@ class Container:
 
 	# Funtion to get the page major faults from a Container
 
+
 	def getMemoryPageFaults(self):
 		return int(self.mem_stats['pgfault'])
 
+
 	def getMemoryMajorFaults(self):
 		return int(self.mem_stats['pgmajfault'])
+
+
+	# Function to get and set Memory State
+
+
+	def setMemoryState(self, consumption:dict):
+		if (consumption['memory'] > 0) or (consumption['swap'] > 0):
+			if (self.mem_state != 'RISING'):
+				self.mem_state = 'RISING'
+				self.mem_state_time = datetime.now()
+
+		elif (consumption['memory'] < 0):
+			if (self.mem_state != 'FALLING'):
+				self.mem_state = 'FALLING'
+				self.mem_state_time = datetime.now()
+
+		else:
+			if (consumption['swap'] <= 0) and (consumption['major_faults'] == 0):
+				if (self.mem_state != 'STABLE'):
+					self.mem_state = 'STABLE'
+					self.mem_state_time = datetime.now()
+
+
+	def getMemoryState(self):
+		return self.mem_state
 
 
 # Children class from Container containing functions to manager lxc containers

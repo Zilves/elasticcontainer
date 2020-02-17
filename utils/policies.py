@@ -1,21 +1,21 @@
 import logging
 import mmap
 import psutil
-from . import database
-from . import functions
+from utils import database
+from utils import functions
 from datetime import datetime
 from classes.host import Host
 from configparser import ConfigParser
 
 
 parser = ConfigParser()
-parser.read('./config/local-config.txt')
+parser.read('../config/local-config.txt')
 
 if parser['Container']['type'] == 'DOCKER':
-	from classes.container import ContainerDocker as Container
+	from ..classes.container import ContainerDocker as Container
 
 elif parser['Container']['type'] == 'LXC':
-	from classes.container import ContainerLXC as Container
+	from ..classes.container import ContainerLXC as Container
 
 
 # ---------- Global Scheduling Policies ----------
@@ -72,13 +72,6 @@ def start_container_policy(host, free_mem): #Em dev
                 free_mem -= container.request_mem
 
 
-# Recovery Memory Policy
-
-
-def recovery_memory_policy(host): # Em Dev
-	print('Em dev')
-
-
 # MEC Like Memory Scaling Policy V1
 
 
@@ -110,9 +103,11 @@ def memory_shaping_policy(host, free_mem):
 
 
 def memory_shaping_policy_V2(host: Host):  # Em Dev
-	rise_list = []
+	need_list = []
+	limited_list = []
 	stable_list = []
-	rise_need = 0
+	mem_need = 0
+	mem_limited_need = 0
 	available_limit = host.get_available_limit()
 
 	# Calculate memory consumption based in the historical info window, categorize the memory comportament and organize in lists
@@ -126,9 +121,15 @@ def memory_shaping_policy_V2(host: Host):  # Em Dev
 					container.mem_state = 'RISING'
 					container.mem_state_time = datetime.now()
 
-				if(consumption['major_faults'] > 0):
-					rise_list.append({'container': container, 'consumption': consumption})
-					rise_need += consumption['major_faults'] * mmap.PAGESIZE
+				if container.mem_state == 'RISING':
+					delta = consumption['memory'] + consumption['swap']
+					need_list.append({'container': container, 'delta': delta})
+					mem_need += delta
+
+					if(consumption['major_faults'] > 0):
+						delta = (consumption['page_faults'] + consumption['major_faults']) * mmap.PAGESIZE
+						limited_list.append({'container': container, 'delta': delta})
+						mem_limited_need += delta
 
 			elif (consumption['memory'] < 0):
 				if (container.mem_state != 'FALLING'):
@@ -147,24 +148,195 @@ def memory_shaping_policy_V2(host: Host):  # Em Dev
 						container.mem_state = 'STABLE'
 						container.mem_state_time = datetime.now()
 
-					stable_list.append(container)
+					if (container.state == 'STABLE') and (container.getMemoryStateTime > 10):
+						stable_list.append(container)
 
 	# Distribute memory over the containers if the request is lower than the available memory limit
 
-	if rise_need < available_limit:
-		for item in rise_list:
-			container = item[container]
-			delta = item['consumption']['major_faults'] * mmap.PAGESIZE
+	if mem_need <= available_limit:
+		for item in need_list:
+			container = item['container']
+			delta = item['delta']
 			container.setMemLimit(limit=str(container.mem_limit + delta), swap=str(container.mem_swap_limit + delta))
 			available_limit -= delta
 
+	elif mem_limited_need <= available_limit:
+		for item in limited_list:
+			container = item['container']
+			delta = item['delta']
+			container.setMemLimit(limit=str(container.mem_limit + delta), swap = str(container.mem_swap_limit + delta))
+			available_limit -= delta
+
 	else:
-		print('have less mem than needed')
+		print('Critical State 1: Needs Some Recover')
 
 	# Activate recover memory policy from stable
 
 	if available_limit <= 0:
-		print('start recover policy')
+		if stable_list:
+			recover = 0
+			for container in stable_list:
+				delta = int(container.mem_stats['inactive_anon'])
+
+				if delta > 0:
+					container.setMemLimit(limit=str(container.mem_limit - delta), swap=str(container.mem_swap_limit - delta))
+					recover += delta
+
+		else:
+			print('Critical State 2: Suspend a Container')
+
+
+# V3
+
+
+def memory_shaping_policy_V3(host: Host):  # Em Dev
+	need_list = []
+	urgent_list = []
+	stable_list = []
+	mem_need = 0
+	mem_urgent_need = 0
+
+	# Classification:
+	# Calculate memory consumption based in the historical info window
+	# Categorize the memory comportament and organize in lists
+
+	for container in host.container_active_list:
+		if container.state == 'RUNNING':
+			consumption = database.get_container_memory_consumption2(container.name, 10)
+			container.setMemoryState(consumption)
+			mem_limit = container.getMemoryLimit()
+
+			if container.getMemoryState() == 'RISING':
+				delta = consumption['memory'] + consumption['swap']
+
+				if (container.getUsedMemory() + delta) >= container.getMemoryLimit():
+					need_list.append({'container': container, 'delta': delta})
+					mem_need += delta
+
+				if consumption['major_faults'] > 0:
+					delta = (consumption['page_faults'] + consumption['major_faults']) * mmap.PAGESIZE
+					urgent_list.append({'container': container, 'delta': delta})
+					mem_urgent_need += delta
+
+			else:
+				if container.getMemoryStateTime() > 10:
+					stable_list.append(container)
+
+	# First Recover:
+	# Recover some memory from FALLING and STABLE containers with Threshold less than 70%
+
+	available_limit = host.get_available_limit()
+
+	for container in stable_list:
+		if container.getMemoryThreshold() < 70:
+			delta = container.getMemoryLimit // 10
+			container.setMemLimit(limit=str(container.mem_limit - delta), swap=str(container.mem_swap_limit - delta))
+			available_limit += delta
+
+	# Distribute Memory
+	# Distribute memory over the containers if the request is lower than the available memory limit
+
+	if mem_need <= available_limit:
+		for item in need_list:
+			container = item['container']
+			delta = item['delta']
+			old_limit = container.getMemoryLimit()
+			old_swap_limit = container.getSwapLimit()
+			container.setMemLimit(limit=str(old_limit + delta), swap=str(old_swap_limit + delta))
+			available_limit -= delta
+
+	elif mem_urgent_need <= available_limit:
+		for item in urgent_list:
+			container = item['container']
+			delta = item['delta']
+			old_limit = container.getMemoryLimit()
+			old_swap_limit = container.getSwapLimit()
+			container.setMemLimit(limit=str(container.mem_limit + delta), swap = str(container.mem_swap_limit + delta))
+			available_limit -= delta
+
+	else:
+		print('Critical State 1: Insufficient Memory for all Urgent Containers')
+		urgent_list.sort(key=lambda item: item['container'].getRunningTime(), reverse=True)
+		index = 0
+
+		while (available_limit > 0) or (index < len(urgent_list)):
+			container = urgent_list[index]['container']
+			needed = urgent_list[index]['delta']
+
+			if (available_limit - needed) > 0:
+				old_limit = container.getMemoryLimit()
+				old_swap_limit = container.getSwapLimit()
+				container.setMemLimit(limit=str(container.mem_limit + needed), swap = str(container.mem_swap_limit + needed))
+				available_limit -= needed
+
+			index += 1
+
+	# Activate recover memory policy from stable
+	# Force to use swap for good
+
+	steal_check = False
+
+	if (available_limit <= mem_need):
+		if stable_list:
+			for container in stable_list:
+				delta = int(container.mem_stats['inactive_anon'])
+
+				if delta > 0:
+					container.setMemLimit(limit=str(container.mem_limit - delta), swap=str(container.mem_swap_limit - delta))
+					available_limit += delta
+					steal_check = True
+
+	if (available_limit <= mem_need):
+		print('Critical State 2: Suspend a Container')
+		sorted_list = sorted(host.container_active_list, key=lambda container: container.getRunningTime())
+		index = 0
+
+		while (available_limit <= mem_need) and (index < len(sorted_list)):
+			container = sorted_list[index]
+
+			if container not in stable_list:
+				available_limit += container.getMemoryLimit()
+				container.suspendContainer()
+				steal_check = True
+
+			index += 1
+
+	# Start new containers or restart suspended containers
+
+	if steal_check == False:
+		sorted_list = sorted(host.container_inactive_list, key=lambda container: container.start_time, reverse=True)
+		print('Lista Ordenada:', sorted_list)
+
+		index = 0
+
+		while (available_limit > 0) and (index < len(sorted_list)):
+			if (container.state == 'SUSPENDED'):
+				if(container.mem_limit <= available_limit):
+					print('Restart container %s', container.name)
+					container.resumeContainer()
+					available_limit -= container.mem_limit
+
+			elif (container.state in ['CREATED', 'NEW']):
+				if(container.request_mem <= available_limit):
+					cpu_allocation = host.get_available_cores(container.request_cpus)
+					swap = container.request_mem + psutil.swap_memory().total
+
+					if(cpu_allocation != ''):
+						if parser['Container']['type'] == 'LXC':
+							container.startContainer()
+							container.setMemLimit(str(container.request_mem), str(swap))
+							container.setCPUCores(cpu_allocation)
+
+						elif parser['Container']['type'] == 'DOCKER':
+							container.startContainer(memory_limit=container.request_mem, swap_limit=swap, cpuset=cpu_allocation)
+
+						host.container_active_list.append(container)
+						host.container_inactive_list.remove(container)
+						available_limit -= container.request_mem
+
+			index += 1
+	else:
+		print('Migration policy here')
 
 
 # Elastic Docker Like Memory Scaling Policy

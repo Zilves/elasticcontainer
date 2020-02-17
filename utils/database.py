@@ -8,7 +8,7 @@ from configparser import ConfigParser
 from datetime import timedelta
 
 parser = ConfigParser()
-parser.read('./config/local-config.txt')
+parser.read('../config/local-config.txt')
 
 if parser['Container']['type'] == 'DOCKER':
 	from classes.container import ContainerDocker as Container
@@ -23,7 +23,7 @@ elif parser['Container']['type'] == 'LXC':
 
 def get_connection():
 	config = ConfigParser()
-	config.read('./config/global-config.txt')
+	config.read('../config/global-config.txt')
 
 	try:
 		conn = mysql.connector.connect(host=config['Database']['hostname'],
@@ -41,7 +41,7 @@ def get_connection():
 
 def get_local_connection():
 	config = ConfigParser()
-	config.read('./config/local-config.txt')
+	config.read('../config/local-config.txt')
 
 	try:
 		conn = mysql.connector.connect(host=config['Localbase']['hostname'],

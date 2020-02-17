@@ -1,9 +1,9 @@
 import time
 import logging
-from . import communication
-from . import database
-from . import scheduler
-from . import policies
+from utils import communication
+from utils import database
+from utils import scheduler
+from utils import policies
 from datetime import datetime
 from multiprocessing import Queue
 from configparser import ConfigParser
@@ -118,7 +118,7 @@ def request_receiver(entry_queue: Queue):
 	while True:
 		container = communication.receive_container_request()
 		config = ConfigParser()
-		config.read('./config/local-config.txt')
+		config.read('../config/local-config.txt')
 
 		if container:
 			logging.info('Received New Container %s and Added to Entry List', container.name)
