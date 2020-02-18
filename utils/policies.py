@@ -259,7 +259,7 @@ def memory_shaping_policy_V3(host: Host):  # Em Dev
 		urgent_list.sort(key=lambda item: item['container'].getRunningTime(), reverse=True)
 		index = 0
 
-		while (available_limit > 0) or (index < len(urgent_list)):
+		while (available_limit > 0) and (index < len(urgent_list)):
 			container = urgent_list[index]['container']
 			needed = urgent_list[index]['delta']
 
@@ -296,7 +296,11 @@ def memory_shaping_policy_V3(host: Host):  # Em Dev
 
 			if container not in stable_list:
 				available_limit += container.getMemoryLimit()
-				container.suspendContainer()
+
+				#Parallel Suspension Thread Creation and Execution
+				suspension_thread = threading.Thread(target = container.suspendContainer, daemon=True)
+				suspension_thread.start()
+
 				steal_check = True
 
 			index += 1
@@ -310,6 +314,8 @@ def memory_shaping_policy_V3(host: Host):  # Em Dev
 		index = 0
 
 		while (available_limit > 0) and (index < len(sorted_list)):
+			container = sorted_list[index]
+
 			if (container.state == 'SUSPENDED'):
 				if(container.mem_limit <= available_limit):
 					print('Restart container %s', container.name)

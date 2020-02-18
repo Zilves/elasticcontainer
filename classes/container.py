@@ -560,7 +560,41 @@ class ContainerDocker(Container):
 				return 'STOPPED'
 
 
+	# Método para verificar se um container existe
+
+
+	def checkContainer(self):
+		client = docker.from_env()
+		check = False
+
+		try:
+			client.containers.get(self.name)
+			check = True
+
+		except docker.errors.NotFound as err:
+			check = False
+
+		if check:
+			print('Container exist!')
+		else:
+			print('Container no exist!')
+
+		return check
+
+
 	# Function to create and start a docker container
+
+	def startContainer2(self):
+		client = docker.from_env()
+		logging.info('Starting Container %s', self.name)
+
+		try:
+			client.containers.run(image=self.template, command=self.command, name=self.name, detach=True)
+			self.start_time = datetime.now()
+			logging.info('Container %s Started with Success', self.name)
+
+		except Exception as err:
+			logging.error('Fail to Start the Container %s with Error: %s', self.name, err)
 
 
 	def startContainer(self, memory_limit:int, swap_limit:int, cpuset:str):
@@ -657,6 +691,7 @@ class ContainerDocker(Container):
 			container = client.containers.get(self.name)
 			if (container.status == 'exited') and (self.state == 'SUSPENDED'):
 				subprocess.check_call(['docker', 'start', '--checkpoint', 'checkpoint0', self.name])
+				subprocess.check_call(['docker', 'checkpoint', 'rm', self.name, 'checkpoint0'])
 
 		except Exception as err:
 			logging.error('Fail to Resume the Container %s with Error: %s', self.name, err)

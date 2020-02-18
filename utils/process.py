@@ -170,13 +170,14 @@ def container_manager(host_queue: Queue, entry_queue: Queue):
 
 		free_mem = host.get_available_memory()
 
-		print('Free Memory Before Policy: ' + str(free_mem // 2 ** 20) + 'MB')
+		#print('Free Memory Before Policy: ' + str(free_mem // 2 ** 20) + 'MB')
 		# free_mem = policies.memory_shaping_policy(host, free_mem)
 		# free_mem = policies.ED_policy(host, free_mem, cooldown_list)
-		print('Free Memory After Policy: ' + str(free_mem // 2 ** 20) + 'MB')
+		policies.memory_shaping_policy_V3(host)
+		#print('Free Memory After Policy: ' + str(free_mem // 2 ** 20) + 'MB')
 
-		if (free_mem > 0) and host.has_free_cores() and host.has_inactive_containers():
-			policies.start_container_policy(host, free_mem)
+		#if (free_mem > 0) and host.has_free_cores() and host.has_inactive_containers():
+			#policies.start_container_policy(host, free_mem)
 
 		host_queue.put(host)
 		logging.debug('Container Manager Sleeping')
