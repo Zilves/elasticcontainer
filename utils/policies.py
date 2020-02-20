@@ -212,16 +212,23 @@ def memory_shaping_policy_V3(host: Host):  # Em Dev
 
 				if (container.getUsedMemory() + delta) >= container.getMemoryLimit():
 					need_list.append({'container': container, 'delta': delta})
+					logging.info('Need Container: %s, Using: %d, Delta: %d, Limit: %d',
+								container.name, container.getUsedMemory(), delta, container.getMemoryLimit())
 					mem_need += delta
 
 				if consumption['major_faults'] > 0:
 					delta = (consumption['page_faults'] + consumption['major_faults']) * mmap.PAGESIZE
 					urgent_list.append({'container': container, 'delta': delta})
+					logging.info('Urgent Container: %s, Using: %d, Delta: %d, Limit: %d',
+								container.name, container.getUsedMemory(), delta, container.getMemoryLimit())
 					mem_urgent_need += delta
 
 			else:
 				if container.getMemoryStateTime() > 10:
 					stable_list.append(container)
+					logging.info('Stable Container: %s, Using: %d, Delta: %d, Limit: %d',
+								container.name, container.getUsedMemory(), delta, container.getMemoryLimit())
+
 
 	# First Recover:
 	# Recover some memory from FALLING and STABLE containers with Threshold less than 70%
