@@ -667,8 +667,10 @@ def get_container_memory_consumption2(name, window_length): # EM_DEV
 				data_list.append(container)
 				time_list.append(time)
 
-			print('Tamanho Datalist = ', len(data_list))
-			print('Wall Time: ',(time_list[0] - time_list[-1]).seconds, ' seconds')
+			#print('Tamanho Datalist = ', len(data_list))
+			walltime = (time_list[0] - time_list[-1]).seconds
+			#print('Wall Time: ', walltime, ' seconds')
+			logging.info('Container: %s, Datalist Size: %d, Wall Time: %d s', name, len(data_list), walltime)
 			cursor.close()
 			conn.close()
 
@@ -693,10 +695,13 @@ def get_container_memory_consumption2(name, window_length): # EM_DEV
 			elif parser['Container']['type'] == 'DOCKER':
 				print('Calcular uso de swap no Docker')
 
-		print('Delta: ' +  str(memory_used // 2 ** 20) + 'MB')
-		print('Swap Delta: ' +  str(swap_used // 2 ** 20) + 'MB')
-		print('Page Faults: ', page_faults)
-		print('Major Faults: ', major_faults)
+		#print('Delta: ' +  str(memory_used // 2 ** 20) + 'MB')
+		#print('Swap Delta: ' +  str(swap_used // 2 ** 20) + 'MB')
+		#print('Page Faults: ', page_faults)
+		#print('Major Faults: ', major_faults)
+		logging.info('Container: %s, MemUsed: %s MB, SwapUsed: %s MB, PgFaults: %d, PgMajorFaults: %d',
+					name, str(memory_used // 2 ** 20), str(swap_used // 2 ** 20), page_faults, major_faults)
+
 		return {'memory': memory_used, 'swap': swap_used, 'page_faults': page_faults, 'major_faults': major_faults}
 
 

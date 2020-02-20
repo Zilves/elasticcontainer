@@ -22,7 +22,7 @@ if __name__ == '__main__':
 
 		# Creating Request Receiver Process
 		logging.info('Starting Request Receiver Process')
-		proc2 = Process(target=process.request_receiver, args=(entry_queue,))
+		proc2 = Process(target=process.request_receiver2, args=(entry_queue,))
 
 		# Creating Container Manager Process
 		logging.info('Starting Container Manager Process')

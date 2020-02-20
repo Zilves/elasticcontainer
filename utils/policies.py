@@ -6,6 +6,7 @@ import functions
 import datetime
 from classes.host import Host
 from configparser import ConfigParser
+from threading import Thread
 
 
 parser = ConfigParser()
@@ -229,7 +230,7 @@ def memory_shaping_policy_V3(host: Host):  # Em Dev
 
 	for container in stable_list:
 		if container.getMemoryThreshold() < 70:
-			delta = container.getMemoryLimit // 10
+			delta = container.getMemoryLimit() // 10
 			container.setMemLimit(limit=str(container.mem_limit - delta), swap=str(container.mem_swap_limit - delta))
 			available_limit += delta
 
@@ -298,8 +299,7 @@ def memory_shaping_policy_V3(host: Host):  # Em Dev
 				available_limit += container.getMemoryLimit()
 
 				#Parallel Suspension Thread Creation and Execution
-				suspension_thread = threading.Thread(target = container.suspendContainer, daemon=True)
-				suspension_thread.start()
+				Thread(target = container.suspendContainer, daemon=True).start()
 
 				steal_check = True
 
@@ -308,7 +308,8 @@ def memory_shaping_policy_V3(host: Host):  # Em Dev
 	# Start new containers or restart suspended containers
 
 	if steal_check == False:
-		sorted_list = sorted(host.container_inactive_list, key=lambda container: container.start_time, reverse=True)
+		#sorted_list = sorted(host.container_inactive_list, key=lambda container: container.start_time, reverse=True)
+		sorted_list = sorted(host.container_inactive_list, key=lambda container: container.getInactiveTime(), reverse=True)
 		print('Lista Ordenada:', sorted_list)
 
 		index = 0

@@ -453,8 +453,12 @@ class ContainerLXC(Container):
 		logging.info('Container %s Old Core Set: %s', self.name, self.cpu_set)
 		logging.info('Container %s New Core Set: %s', self.name, cores)
 
-		if not container.set_cgroup_item('cpuset.cpus', cores):
+		try:
+			container.set_cgroup_item('cpuset.cpus', cores)
+
+		except Excetion as err:
 			logging.error('Fail in Set the Cpu Core Affinity on the Container %s', self.name)
+			logging.error('Error: %s', err)
 
 
 	# Método para definir limite de uso de memória de um container, usando o cgroups
@@ -465,11 +469,13 @@ class ContainerLXC(Container):
 		logging.info('Container %s old limit: %d', self.name, self.mem_limit)
 		logging.info('Container %s set new memory limit: %s', self.name, limit)
 
-		if not container.set_cgroup_item('memory.limit_in_bytes', limit):
-			logging.error('Fail in Set Memory Usage Limit on the Container %s', self.name)
-		if not container.set_cgroup_item('memory.memsw.limit_in_bytes', swap):
-			logging.error('Fail in Set Memory + Swap Usage Limit on the Container %s', self.name)
+		try:
+			container.set_cgroup_item('memory.limit_in_bytes', limit)
+			container.set_cgroup_item('memory.memsw.limit_in_bytes', swap)
 
+		except Exception as err:
+			logging.error('Fail in Set Memory + Swap Usage Limit on the Container %s', self.name)
+			logging.error('Error: %s', err)
 
 	# Metodo para criar arquivo de um workflow
 

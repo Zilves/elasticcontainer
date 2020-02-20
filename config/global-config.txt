@@ -11,4 +11,4 @@ user = userdb
 password = bdresu
 
 [Container]
-type = DOCKER
+type = LXC

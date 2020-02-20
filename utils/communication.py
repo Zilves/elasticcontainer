@@ -3,6 +3,7 @@ import socket
 import struct
 import logging
 from configparser import ConfigParser
+from multiprocessing import Queue
 
 
 # ---------- Monitors Communication ----------
@@ -44,7 +45,7 @@ def receive_monitor_data():
 		global_socket = socket.socket()
 		#global_socket.bind((conn_address[0], conn_address[1]))
 		global_socket.bind((config['Manager']['global_ip'], int(config['Manager']['global_receive_port'])))
-		global_socket.listen(1)
+		global_socket.listen(5)
 		receive_socket, address = global_socket.accept()
 		#print('Connection from: %s' % str(address))
 		message_length = recvall(receive_socket, 4)
@@ -102,9 +103,10 @@ def receive_container_request():
 	request = None
 
 	try:
-		host_socket = socket.socket()
+		host_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+		host_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 		host_socket.bind((socket.gethostname(), int(config['Manager']['local_receive_port'])))
-		host_socket.listen(1)
+		host_socket.listen(5)
 		receive_socket, address = host_socket.accept()
 		# print('Connection from: %s' % str(address))
 		data = receive_socket.recv(1024)
@@ -137,3 +139,27 @@ def recvall(temp_socket, n):
 		data += packet
 
 	return data
+
+
+# Conn Thread
+
+def receive_thread(connection, entry_queue: Queue):
+	data = b''
+	container = None
+	config = ConfigParser()
+	config.read('./config/local-config.txt')
+
+	data = connection.recv(1024)
+	container = dill.loads(data)
+	connection.close()
+
+	if container:
+		logging.info('Received New Container %s and Added to Entry List', container.name)
+		logging.debug('New Container: %s', vars(container))
+
+		if config['Container']['type'] == 'LXC':
+			container.createContainer()
+
+	entry_list = entry_queue.get()
+	entry_list.append(container)
+	entry_queue.put(entry_list)

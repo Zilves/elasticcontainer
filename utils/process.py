@@ -4,9 +4,11 @@ import communication
 import database
 import scheduler
 import policies
+import socket
 from datetime import datetime
 from multiprocessing import Queue
 from configparser import ConfigParser
+from threading import Thread
 
 
 # ---------- Processos de Monitoramento ----------
@@ -134,6 +136,33 @@ def request_receiver(entry_queue: Queue):
 		entry_queue.put(entry_list)
 
 
+def request_receiver2(entry_queue: Queue):
+	config = ConfigParser()
+	config.read('./config/local-config.txt')
+
+	receive_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+	receive_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
+
+	try:
+		receive_socket.bind((socket.gethostname(), int(config['Manager']['local_receive_port'])))
+
+	except socket.error as err:
+		logging.error('Receiving Request from Global Error: %s', err)
+
+	receive_socket.listen(5)
+
+	while True:
+		connection, address = receive_socket.accept()
+
+		try:
+			Thread(target=communication.receive_thread, args=(connection, entry_queue)).start()
+		except:
+			print('Thread não criada')
+
+	receive_socket.close()
+
+
+
 # ----------- Processo de Gerência dos Containers ----------
 # Metodo de gerência dos containers em um host
 
@@ -164,6 +193,7 @@ def container_manager(host_queue: Queue, entry_queue: Queue):
 
 		for container in entry_list:
 			host.container_inactive_list.append(container)
+			container.inactive_time = datetime.now()
 			entry_list.remove(container)
 
 		entry_queue.put(entry_list)
