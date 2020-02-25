@@ -1,3 +1,5 @@
+import logging
+
 class Request:
 
 
@@ -63,6 +65,7 @@ class Request:
 					self.listcontainers[index1] = container_list[index2]
 				else:
 					self.listcontainers.remove(container)
+					logging.info('Request: %s removed container %s with status %s.', self.name, container.name, container.state)
 
 
 ### Function to change a request status based upon the container status
@@ -72,7 +75,7 @@ class Request:
 		check = False
 
 		# if any(container.state == 'RUNNING' for container in self.listcontainers):
-		if (self.status == 'SCHEDULED') and (any(container.state == 'RUNNING' for container in self.listcontainers)):
+		if (self.status == 'SCHEDULED') and (all(container.state == 'RUNNING' for container in self.listcontainers)):
 			self.status = 'RUNNING'
 			check = True
 		elif (not self.listcontainers) and (self.status == 'RUNNING'):

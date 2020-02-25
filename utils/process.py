@@ -177,9 +177,9 @@ def container_manager(host_queue: Queue, entry_queue: Queue):
 		host.update()
 		host.update_containers()
 
-		print('Active List:', host.container_active_list)
-		print('Inactive List:', host.container_inactive_list)
-		print('Core Allocation List:', host.core_allocation)
+		print('Active List:', host.container_active_list, flush=True)
+		print('Inactive List:', host.container_inactive_list, flush=True)
+		print('Core Allocation List:', host.core_allocation, flush=True)
 
 		for cooldown in cooldown_list:
 			if not host.is_active_container(cooldown['name']):
@@ -198,7 +198,7 @@ def container_manager(host_queue: Queue, entry_queue: Queue):
 
 		entry_queue.put(entry_list)
 
-		free_mem = host.get_available_memory()
+		#free_mem = host.get_available_memory()
 
 		#print('Free Memory Before Policy: ' + str(free_mem // 2 ** 20) + 'MB')
 		# free_mem = policies.memory_shaping_policy(host, free_mem)
@@ -209,6 +209,8 @@ def container_manager(host_queue: Queue, entry_queue: Queue):
 		#if (free_mem > 0) and host.has_free_cores() and host.has_inactive_containers():
 			#policies.start_container_policy(host, free_mem)
 
+		print('Active List:', host.container_active_list)
+		print('Inactive List:', host.container_inactive_list)
 		host_queue.put(host)
 		logging.debug('Container Manager Sleeping')
 		time.sleep(10)

@@ -225,14 +225,16 @@ class Host:
 			container.update()
 
 		for container in self.container_active_list:
-			if container.state == 'STOPPED' or 'SUSPENDED':
+			if container.state in ['STOPPED','SUSPENDED','SUSPENDING']:
 				self.container_inactive_list.append(container)
 				container.inactive_time = datetime.now()
 				self.container_active_list.remove(container)
+				logging.info('Container %s moved during Update from Active -> Inactive with status %s.', container.name, container.state)
 
 		# Update Stats from Active List Containers
 		for container in self.container_inactive_list:
-			if container.state == 'RUNNING':
+			if container.state in ['RUNNING','RESUMING']:
 				self.container_active_list.append(container)
 				container.inactive_time = 0
 				self.container_inactive_list.remove(container)
+				logging.info('Container %s moved during Update from Inactive -> Active with status %s.', container.name, container.state)

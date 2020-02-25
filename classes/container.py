@@ -146,7 +146,6 @@ class Container:
 		result = int(self.mem_stats['rss']) + int(self.mem_stats['cache'])
 		return result
 
-
 	def getUsedMemory2(self):
 		result = int(self.mem_stats['rss']) + int(self.mem_stats['cache']) + int(self.mem_stats['swap'])
 		return result
@@ -181,7 +180,7 @@ class Container:
 
 
 	def setMemoryState(self, consumption:dict):
-		if (consumption['memory'] > 0) or (consumption['swap'] > 0):
+		if (consumption['memory'] > 0) or (consumption['swap'] > 0) or (consumption['major_faults'] > 0):
 			if (self.mem_state != 'RISING'):
 				self.mem_state = 'RISING'
 				self.mem_state_time = datetime.now()
@@ -210,11 +209,15 @@ class ContainerLXC(Container):
 
 	def update(self):
 		container = lxc.Container(self.name)
-		logging.debug('Updating container  %s  info with status %s', container.name, container.state)
+		logging.info('Updating container %s info with status %s and state %s', container.name, container.state, self.state)
 
 		try:
-			if not (container.state in ['STOPPED','SUSPENDED','NEW','CREATED']):
-				self.state = container.state
+			#if not (container.state in ['STOPPED','SUSPENDING','SUSPENDED','NEW','CREATED']):
+			#if (container.state != 'STOPPED') and (not (self.state in ['SUSPENDING','SUSPENDED'])):
+			if (container.state != 'STOPPED'):
+				if self.state != 'SUSPENDING':
+					self.state = container.state
+
 				self.ip = container.get_ips()
 				self.cpu_set = container.get_cgroup_item('cpuset.cpus')
 				self.cpu_used = int(container.get_cgroup_item('cpuacct.usage'))
@@ -264,8 +267,17 @@ class ContainerLXC(Container):
 				self.host_memory_stats = psutil.virtual_memory()
 				self.host_swap_stats = psutil.swap_memory()
 
-			elif (container.state == 'STOPPED') and (not (self.state in ['SUSPENDED', 'NEW', 'CREATED'])):
-				self.state = container.state
+			#elif (container.state == 'STOPPED') and (not (self.state in ['RESUMING','SUSPENDING','SUSPENDED','NEW','CREATED'])):
+			#	self.state = container.state
+			#
+			#if (container.state == 'STOPPED') and (self.state == 'SUSPENDING'):
+			#	self.state = 'SUSPENDED'
+
+			else:
+				if self.state == 'SUSPENDING':
+					self.state = 'SUSPENDED'
+				elif self.state not in ['RESUMING','SUSPENDING','SUSPENDED','NEW','CREATED']:
+					self.state = container.state
 
 		except Exception as err:
 			logging.error('Fail to update container %s stats', self.name)
@@ -366,11 +378,14 @@ class ContainerLXC(Container):
 	def stopContainer(self):
 		container = lxc.Container(self.name)
 
+		logging.info('Stopping Container %s', self.name)
+
 		try:
 			if not container.stop():
 				logging.error('Fail to Stop the Container %s', self.name)
 
 			container.wait('STOPPED', timeout=60)
+			logging.info('Container %s Stopped with Success', self.name)
 
 		except Exception as err:
 			logging.error('Fail to Stop the Container %s with Error: %s', self.name, err)
@@ -382,10 +397,17 @@ class ContainerLXC(Container):
 	def pauseContainer(self):
 		container = lxc.Container(self.name)
 
-		if not container.freeze():
-			logging.error('Fail to Freeze the Container %s', self.name)
+		logging.info('Pausing Container %s', self.name)
 
-		container.wait('FROZEN', timeout=60)
+		try:
+			if not container.freeze():
+				logging.error('Fail to Freeze the Container %s', self.name)
+
+			container.wait('FROZEN', timeout=60)
+			logging.info('Container %s Paused with Success', self.name)
+
+		except Exception as err:
+			logging.error('Fail to Pause the Container %s with Error: %s', self.name, err)
 
 
 	# Método para descongelar um container em execução
@@ -394,10 +416,17 @@ class ContainerLXC(Container):
 	def unpauseContainer(self):
 		container = lxc.Container(self.name)
 
-		if not container.unfreeze():
-			logging.error('Fail to Unfreeze the Container %s', self.name)
+		logging.info('Unpausing Container %s', self.name)
 
-		container.wait('RUNNING', timeout=60)
+		try:
+			if not container.unfreeze():
+				logging.error('Fail to Unfreeze the Container %s', self.name)
+
+			container.wait('RUNNING', timeout=60)
+			logging.info('Container %s Unpaused with Success', self.name)
+
+		except Exception as err:
+			logging.error('Fail to Unpause the Container %s with Error: %s', self.name, err)
 
 
 	# Método para suspender um container em execução
@@ -410,6 +439,8 @@ class ContainerLXC(Container):
 		path = checkpoint_path + '/' + self.name
 		container = lxc.Container(self.name)
 
+		logging.info('Suspending Container %s', self.name)
+
 		try:
 			if os.path.exists(path):
 				shutil.rmtree(path)
@@ -417,6 +448,7 @@ class ContainerLXC(Container):
 			subprocess.check_call(['lxc-checkpoint', '-s', '-D', path, '-n', self.name])
 			container.wait('STOPPED', timeout=60)
 			self.state = 'SUSPENDED'
+			logging.info('Container %s Suspended with Success', self.name)
 
 		except Exception as err:
 			logging.error('Fail to Suspended the Container %s', self.name)
@@ -426,16 +458,20 @@ class ContainerLXC(Container):
 	# Método para despausar um container em execução
 
 
-	def resumeContainer(self):
+	def resumeContainer(self, cpuset):
 		config = ConfigParser()
 		config.read('./config/local-config.txt')
 		checkpoint_path = config['Checkpoint']['Path']
 		path = checkpoint_path + '/' + self.name
 		container = lxc.Container(self.name)
 
+		logging.info('Resuming Container %s', self.name)
+
 		try:
 			subprocess.check_call(['lxc-checkpoint', '-r', '-D', path, '-n', self.name])
 			container.wait('RUNNING', timeout=60)
+			logging.info('Container %s Resumed with Success', self.name)
+			self.setCPUCores(cpuset)
 
 			if os.path.exists(path):
 				shutil.rmtree(path)
@@ -456,7 +492,7 @@ class ContainerLXC(Container):
 		try:
 			container.set_cgroup_item('cpuset.cpus', cores)
 
-		except Excetion as err:
+		except Exception as err:
 			logging.error('Fail in Set the Cpu Core Affinity on the Container %s', self.name)
 			logging.error('Error: %s', err)
 
