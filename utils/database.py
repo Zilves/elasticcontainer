@@ -683,6 +683,8 @@ def get_container_memory_consumption2(name, window_length): # EM_DEV
 		page_faults = 0
 		major_faults = 0
 
+		print('Container: ', name, ' Init Window: ', time_list[0], ' End Window: ', time_list[-1],
+			  'Wall: ', (time_list[0] - time_list[-1]).seconds, flush=True)
 
 		for index in range(len(data_list) - 1):
 			memory_used += data_list[index].getUsedMemory() - data_list[index + 1].getUsedMemory()

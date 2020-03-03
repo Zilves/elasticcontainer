@@ -208,36 +208,39 @@ def memory_shaping_policy_V3(host: Host):  # Em Dev
 			consumption = database.get_container_memory_consumption2(container.name, 10)
 			container.setMemoryState(consumption)
 			mem_limit = container.getMemoryLimit()
-			print('Container: ', container.name, ' Mem_State: ', container.mem_state, ' MU: ', consumption['memory'],
-			' SU: ', consumption['swap'], 'MJF: ', consumption['major_faults'])
+			mem_used = container.getUsedMemory()
+			print('Container: ', container.name, ' Using: ', mem_used, ' Limit: ', mem_limit, ' Mem_State: ', container.mem_state,
+				  ' MU: ', consumption['memory'], ' SU: ', consumption['swap'], 'MJF: ', consumption['major_faults'])
 
 			if container.getMemoryState() == 'RISING':
 				delta = consumption['memory'] + consumption['swap']
 
-				if (container.getUsedMemory() + delta) >= container.getMemoryLimit():
+				#if (container.getUsedMemory() + delta) >= container.getMemoryLimit():
+				if (mem_used + delta) >= mem_limit:
 					need_list.append({'container': container, 'delta': delta})
 					logging.info('Need Container: %s, Using: %d, Delta: %d, Limit: %d',
-								container.name, container.getUsedMemory(), delta, container.getMemoryLimit())
+								container.name, mem_used, delta, mem_limit)
 					mem_need += delta
 
 				if consumption['major_faults'] > 0:
-					delta = (consumption['page_faults'] + consumption['major_faults']) * mmap.PAGESIZE
+					#delta = (consumption['page_faults'] + consumption['major_faults']) * mmap.PAGESIZE
+					delta = consumption['major_faults'] * mmap.PAGESIZE
 					urgent_list.append({'container': container, 'delta': delta})
 					logging.info('Urgent Container: %s, Using: %d, Delta: %d, Limit: %d',
-								container.name, container.getUsedMemory(), delta, container.getMemoryLimit())
+								container.name, mem_used, delta, mem_limit)
 					mem_urgent_need += delta
 
 			else:
 				if container.getMemoryStateTime() > 10:
 					stable_list.append(container)
-					logging.info('Stable Container: %s, Using: %d, Limit: %d',
-								container.name, container.getUsedMemory(), container.getMemoryLimit())
+					logging.info('Stable Container: %s, Using: %d, Limit: %d', container.name, mem_used, mem_limit)
 
 
 	# First Recover:
-	# Recover some memory from FALLING and STABLE containers with Threshold less than 70%
+	# Recover some memory from FALLING and STABLE containers with Threshold less than 90%
 
 	available_limit = host.get_available_limit()
+	logging.info('Available Limit to be distribute: %d', available_limit)
 
 	print('Light Recovery Phase', flush=True)
 	print('Available: ', available_limit, ' Need: ', mem_need, ' Urgent: ', mem_urgent_need, flush=True)

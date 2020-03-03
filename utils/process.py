@@ -117,6 +117,7 @@ def global_scheduler(host_list, request_list):
 
 
 def request_receiver(entry_queue: Queue):
+
 	while True:
 		container = communication.receive_container_request()
 		config = ConfigParser()
@@ -137,6 +138,7 @@ def request_receiver(entry_queue: Queue):
 
 
 def request_receiver2(entry_queue: Queue):
+
 	config = ConfigParser()
 	config.read('./config/local-config.txt')
 
@@ -177,6 +179,7 @@ def container_manager(host_queue: Queue, entry_queue: Queue):
 		host.update()
 		host.update_containers()
 
+		print('Datetime: ', datetime.now())
 		print('Active List:', host.container_active_list, flush=True)
 		print('Inactive List:', host.container_inactive_list, flush=True)
 		print('Core Allocation List:', host.core_allocation, flush=True)

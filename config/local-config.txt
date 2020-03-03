@@ -6,8 +6,8 @@ local_receive_port = 8600
 
 [Localbase]
 hostname = localhost
-database = localbase
-#database = tempbase
+#database = localbase
+database = tempbase
 user = userdb
 password = bdresu
 
@@ -16,7 +16,7 @@ type = oci
 path = /opt/templates
 
 [Reserve]
-cpu_cores = 1
+cpu_cores = 2
 memory = 2147483648
 
 [Checkpoint]
