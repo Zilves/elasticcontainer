@@ -1,8 +1,10 @@
 import psutil
 import socket
 import logging
+import mmap
 from configparser import ConfigParser
 from datetime import datetime
+import multiprocessing as mp
 
 
 class Host:
@@ -64,6 +66,25 @@ class Host:
 		return self.hostname
 
 
+### Get class atribute values Functions
+
+
+	def getMemoryAvailablePG(self):
+		return round(self.memory.available / mmap.PAGESIZE)
+
+
+	def getMemoryUsedPG(self):
+		return round(self.memory.used / mmap.PAGESIZE)
+
+
+	def getMemoryTotalPG(self):
+		return round(self.memory.total / mmap.PAGESIZE)
+
+
+	def getMemoryReservationPG(self):
+		return round(self.memory_reservation / mmap.PAGESIZE)
+
+
 ### Update Function for get most recent resource information from host
 
 
@@ -82,6 +103,7 @@ class Host:
 
 ### Function to calculate available memory from a host, reserving some memory for their processes
 ### Uses Linux Available memory as base information
+
 
 	def get_available_memory(self):
 		sum_limits = 0
@@ -119,9 +141,34 @@ class Host:
 
 		for container in self.container_active_list:
 			if container.state == 'RUNNING':
-				sum_limits += container.mem_limit
+				sum_limits += container.getMemoryLimit()
 
 		return sum_limits
+
+
+	def get_container_total_limitPG(self):
+		sum_limits = 0
+
+		for container in self.container_active_list:
+			#if container.state == 'RUNNING':
+			sum_limits += container.getMemoryLimitPG()
+
+		return sum_limits
+
+
+	def get_container_total_usedPG(self):
+		sum_limits = 0
+
+		for container in self.container_active_list:
+			#if container.state == 'RUNNING':
+			sum_limits += container.getUsedMemoryPG()
+
+		return sum_limits
+
+
+	def get_max_usable_memoryPG(self):
+		result = self.getMemoryTotalPG() - self.getMemoryReservationPG()
+		return result
 
 
 ### Function to calculate the available limit based on the total limit set and the host total memory
@@ -131,6 +178,39 @@ class Host:
 		container_limit = self.get_container_total_limit()
 		available = self.memory.total - container_limit - self.memory_reservation
 		return available
+
+
+	def get_host_memory_info(self):
+		total_container_limit = self.get_container_total_limitPG()
+		NAHM = self.getMemoryTotalPG() - total_container_limit - self.getMemoryReservationPG()
+		#host_available_memory = self.getMemoryAvailablePG()
+		host_available_memory = self.getMemoryTotalPG() - self.getMemoryReservationPG() - self.get_container_total_usedPG()
+		return total_container_limit, NAHM, host_available_memory
+
+
+### Functions to calculate the length of the Active and Inactive Lists:
+
+
+	def active_list_counter(self):
+		counter = 0
+
+		for container in self.container_active_list:
+
+			if container.getContainerState() in ['RUNNING', 'PAUSED']:
+				counter += 1
+
+		return counter
+
+
+	def inactive_list_counter(self):
+		counter = 0
+
+		for container in self.container_inactive_list:
+
+			if container.getContainerState() in [ 'SUSPENDING', 'SUSPENDED', 'QUEUED']:
+				counter += 1
+
+		return counter
 
 
 ### Function to verify if a host has cpu cores not set to any running containers
@@ -148,7 +228,7 @@ class Host:
 ### Function to get a set of cores for cgroup cpuset of a container request
 
 
-	def get_available_cores(self, request = int):
+	def get_available_cores(self, request:int):
 		free_cores = self.core_allocation.count(False) - self.core_reservation
 		cpu_allocation = ''
 
@@ -168,8 +248,20 @@ class Host:
 				if core < request:
 					cpu_allocation += ','
 
-
 		return cpu_allocation
+
+
+### Functions to lock and unlock allocated cores cpuset
+
+
+	def lock_cores(self, core_list:list):
+		for core in core_list:
+			self.core_allocation[int(core)] = True
+
+
+	def unlock_cores(self, core_list:list):
+		for core in core_list:
+			self.core_allocation[int(core)] = False
 
 
 ### Function to verify if a host has inactive containers
@@ -186,7 +278,7 @@ class Host:
 ### Function to verify if a container is a active container in a host
 
 
-	def is_active_container(self, name = str):
+	def is_active_container(self, name:str):
 		check = False
 
 		for container in self.container_active_list:
@@ -202,7 +294,7 @@ class Host:
 
 	def remove_finished_containers(self):
 		for container in self.container_inactive_list:
-			if container.state == 'STOPPED':
+			if container.state == 'FINISHED' and container.checkContainer():
 				logging.info('Removing container %s with status %s', container.name, container.state)
 				core_list = container.cpu_set.split()
 
@@ -211,7 +303,9 @@ class Host:
 					self.core_allocation[int(core)] = False
 
 				self.container_inactive_list.remove(container)
-				container.destroyContainer()
+				ctx = mp.get_context('fork')
+				proc = mp.Process(target=container.destroyContainer)
+				proc.start()
 
 
 ### Function to update the container resource information for each container allocated to the host
@@ -219,13 +313,23 @@ class Host:
 
 	def update_containers(self):
 		for container in self.container_active_list:
-			container.update()
+
+			if container.checkContainer():
+				container.update()
+
+			else:
+				self.container_active_list.remove(container)
 
 		for container in self.container_inactive_list:
-			container.update()
+
+			if container.checkContainer():
+				container.update()
+
+			else:
+				self.container_inactive_list.remove(container)
 
 		for container in self.container_active_list:
-			if container.state in ['STOPPED','SUSPENDED','SUSPENDING']:
+			if container.state in ['FINISHED','SUSPENDED','SUSPENDING']:
 				self.container_inactive_list.append(container)
 				container.inactive_time = datetime.now()
 				self.container_active_list.remove(container)
@@ -233,6 +337,58 @@ class Host:
 
 		# Update Stats from Active List Containers
 		for container in self.container_inactive_list:
+			if container.state in ['RUNNING','RESUMING']:
+				self.container_active_list.append(container)
+				container.inactive_time = 0
+				self.container_inactive_list.remove(container)
+				logging.info('Container %s moved during Update from Inactive -> Active with status %s.', container.name, container.state)
+
+
+	def update_containers2(self):
+		for container in self.container_active_list:
+
+			if container.checkContainer():
+				container.updateState()
+				container.getHostInfo()
+
+				if container.getContainerState() in ['PAUSED','RUNNING']:
+					container.update2()
+					self.lock_cores(container.getCpuset())
+
+				else:
+					self.unlock_cores(container.getCpuset())
+
+			else:
+				self.container_active_list.remove(container)
+				self.unlock_cores(container.getCpuset())
+
+		for container in self.container_inactive_list:
+
+			if container.checkContainer():
+				container.updateState()
+				container.getHostInfo()
+
+				if container.getContainerState() in ['PAUSED','RUNNING']:
+					container.update2()
+					self.lock_cores(container.getCpuset())
+
+				else:
+					self.unlock_cores(container.getCpuset())
+
+			else:
+				self.container_inactive_list.remove(container)
+				self.unlock_cores(container.getCpuset())
+
+		for container in self.container_active_list:
+
+			if container.state in ['FINISHED','SUSPENDED','SUSPENDING']:
+				self.container_inactive_list.append(container)
+				container.inactive_time = datetime.now()
+				self.container_active_list.remove(container)
+				logging.info('Container %s moved during Update from Active -> Inactive with status %s.', container.name, container.state)
+
+		for container in self.container_inactive_list:
+
 			if container.state in ['RUNNING','RESUMING']:
 				self.container_active_list.append(container)
 				container.inactive_time = 0
