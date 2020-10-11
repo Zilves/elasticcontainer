@@ -5,7 +5,7 @@ from classes.application import Application
 from classes.user import User
 from classes.request import Request
 from configparser import ConfigParser
-from datetime import timedelta
+from datetime import timedelta, datetime
 
 parser = ConfigParser()
 parser.read('./config/local-config.txt')
@@ -474,7 +474,7 @@ def update_container_status(container: Container):
 
 
 def get_containers_from_request(reqid: int):
-	query = "SELECT c.containerid, c.containername, c.command, c.status, c.estimated_time, a.image, a.min_memory, a.num_cores \
+	query = "SELECT c.containerid, c.containername, c.command, c.status, c.estimated_time, a.image, a.min_memory, a.max_memory, a.num_cores, a.apptype \
 			FROM container c, application a WHERE c.rid = %s AND a.appid = c.aid ORDER BY c.containerid"
 	info = (reqid,)
 	container_list = []
@@ -494,9 +494,11 @@ def get_containers_from_request(reqid: int):
 				container.state = item[3]
 				container.estimated_time = item[4]
 				container.template = item[5]
-				container.request_mem = item[6]
-				container.request_cpus = item[7]
-				print('Container: ', vars(container))
+				container.min_mem_limit = item[6]
+				container.max_mem_limit = item[7]
+				container.request_cpus = item[8]
+				container.apptype = item[9]
+				#print('Container: ', vars(container))
 				container_list.append(container)
 
 			cursor.close()
@@ -577,6 +579,40 @@ def get_local_container_history(name: str):
 			logging.info('Not Find any Container History for %s on Local Database', name)
 		return data_list, time_list
 
+
+def get_local_container_history_interval(name, window_length):
+	#query = "SELECT data, time FROM container_history WHERE name = %s ORDER BY time DESC LIMIT %s"
+	query = "SELECT data, time from container_history WHERE name = %s AND time >= %s ORDER BY time DESC"
+	info = (name, window_length)
+
+	time_list = []
+	data_list = []
+
+	try:
+		conn = get_local_connection()
+
+		if conn:
+			cursor = conn.cursor()
+			cursor.execute(query, info)
+
+			for item in cursor:
+				container = dill.loads(item[0])
+				time = item[1]
+				data_list.append(container)
+				time_list.append(time)
+
+			cursor.close()
+			conn.close()
+
+	except mysql.connector.Error as err:
+		logging.error('Get Container %s History on Local Database Error: %s', name, err)
+
+	finally:
+		if not data_list and not time_list:
+			logging.info('Not Find any Container History for %s on Local Database', name)
+		return data_list, time_list
+
+
 # Function to remove a container stored data from local database
 
 
@@ -647,7 +683,7 @@ def get_container_memory_consumption(name, window_length):
 		return delta, swapdelta
 
 
-def get_container_memory_consumption2(name, window_length): # EM_DEV
+def get_container_memory_consumption2(name, window_length):
 	query = "SELECT data, time FROM container_history WHERE name = %s ORDER BY time DESC LIMIT %s"
 	info = (name, window_length)
 
@@ -705,6 +741,135 @@ def get_container_memory_consumption2(name, window_length): # EM_DEV
 					name, str(memory_used // 2 ** 20), str(swap_used // 2 ** 20), page_faults, major_faults)
 
 		return {'memory': memory_used, 'swap': swap_used, 'page_faults': page_faults, 'major_faults': major_faults}
+
+
+def get_container_memory_consumption3(name, last_sched):
+	query = "SELECT data, time FROM container_history WHERE name = %s AND time >= %s ORDER BY time DESC"
+	info = (name, last_sched)
+
+	data_list = []
+	time_list = []
+
+	try:
+		conn = get_local_connection()
+
+		if conn:
+			cursor = conn.cursor(buffered=True)
+			cursor.execute(query, info)
+
+			for item in cursor:
+				container = dill.loads(item[0])
+				time = item[1]
+				data_list.append(container)
+				time_list.append(time)
+
+			cursor.close()
+			conn.close()
+
+	except mysql.connector.Error as err:
+		logging.error('Get Container %s History on Local Database Error: %s', name, err)
+
+	finally:
+		memory_used = 0
+		swap_used = 0
+		major_faults = 0
+
+		#print('Tamanho Datalist = ', len(data_list)
+		walltime = (time_list[0] - time_list[-1]).seconds
+		logging.info('Container: %s, Datalist Size: %d, Wall Time: %d s', name, len(data_list), walltime)
+
+		print('Container: ', name, ' Init Window: ', time_list[0], ' End Window: ', time_list[-1],
+			  'Wall: ', (time_list[0] - time_list[-1]).seconds, flush=True)
+
+		for index in range(len(data_list) - 1):
+			memory_used += (data_list[index].getUsedMemory() - data_list[index + 1].getUsedMemory()) #// (time_list[index] - time_list[index + 1]).seconds
+			major_faults += data_list[index].getMemoryMajorFaults() - data_list[index + 1].getMemoryMajorFaults()
+
+			if parser['Container']['type'] == 'LXC':
+				swap_used += (int(data_list[index].mem_stats['swap']) - int(data_list[index + 1].mem_stats['swap'])) #// (time_list[index] - time_list[index + 1]).seconds
+
+			elif parser['Container']['type'] == 'DOCKER':
+				print('Calcular uso de swap no Docker')
+
+		memory_used = memory_used // walltime
+		swap_used = swap_used // walltime
+
+		logging.info('Container: %s, MemUsed: %s MB/s, SwapUsed: %s MB/s, PgMajorFaults: %d',
+					name, str(memory_used // 2 ** 20), str(swap_used // 2 ** 20), major_faults)
+
+		return {'memory': memory_used, 'swap': swap_used, 'major_faults': major_faults}
+
+
+def get_container_memory_consumption4(name, short_sched, long_sched):
+	query = "SELECT data, time FROM container_history WHERE name = %s AND time >= %s ORDER BY time"
+	info1 = (name, short_sched)
+	info2 = (name, long_sched)
+
+	datalist_short = []
+	datalist_long = []
+	timelist_short = []
+	timelist_long = []
+
+	try:
+		conn = get_local_connection()
+
+		if conn:
+			cursor = conn.cursor(buffered=True)
+			cursor.execute(query, info1)
+
+			for item in cursor:
+				container = dill.loads(item[0])
+				time = item[1]
+				datalist_short.append(container)
+				timelist_short.append(time)
+
+			cursor.execute(query, info2)
+
+			for item in cursor:
+				container = dill.loads(item[0])
+				time = item[1]
+				datalist_long.append(container)
+				timelist_long.append(time)
+
+			cursor.close()
+			conn.close()
+
+	except mysql.connector.Error as err:
+		logging.error('Get Container %s History on Local Database Error: %s', name, err)
+
+	finally:
+		memory_used_short = 0
+		memory_used_long = 0
+		swap_used_short = 0
+		swap_used_long = 0
+		major_faults = 0
+
+		walltime_long = (timelist_long[-1] - timelist_long[0]).seconds
+		walltime_short = (timelist_short[-1] - timelist_short[0]).seconds
+
+		memory_used_short += (datalist_short[-1].getUsedMemory() - datalist_short[0].getUsedMemory()) // walltime_short
+		memory_used_long += (datalist_long[-1].getUsedMemory() - datalist_long[0].getUsedMemory()) // walltime_long
+		major_faults += datalist_long[-1].getMemoryMajorFaults() - datalist_long[0].getMemoryMajorFaults()
+
+		if parser['Container']['type'] == 'LXC':
+			swap_used_short += (int(datalist_short[-1].mem_stats['swap']) - int(datalist_short[0].mem_stats['swap'])) // walltime_short
+			swap_used_long += (int(datalist_long[-1].mem_stats['swap']) - int(datalist_long[0].mem_stats['swap'])) // walltime_long
+
+		elif parser['Container']['type'] == 'DOCKER':
+			print('Calcular uso de swap no Docker')
+
+		if(memory_used_long + swap_used_long) <= (memory_used_short + swap_used_short):
+			memory_used = memory_used_short
+			swap_used = swap_used_short
+
+		else:
+			memory_used = (memory_used_long + memory_used_short) / 2
+			swap_used = (swap_used_long + swap_used_short) / 2
+
+		logging.info('Container: %s, MemUsed: %s MB/s, SwapUsed: %s MB/s, PgMajorFaults: %d',
+					name, str(memory_used // 2 ** 20), str(swap_used // 2 ** 20), major_faults)
+
+		return {'memory': memory_used, 'swap': swap_used, 'major_faults': major_faults}
 
 
 def get_container_memory_consumption_ED(name, window_length):

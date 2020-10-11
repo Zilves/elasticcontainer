@@ -36,14 +36,11 @@ def send_monitor_data(host):
 def receive_monitor_data():
 	config = ConfigParser()
 	config.read('./config/global-config.txt')
-	#conn_address = (config['Manager']['ip'], int(config['Manager']['port']))
-
 	data = b''
 	host = None
 
 	try:
 		global_socket = socket.socket()
-		#global_socket.bind((conn_address[0], conn_address[1]))
 		global_socket.bind((config['Manager']['global_ip'], int(config['Manager']['global_receive_port'])))
 		global_socket.listen(5)
 		receive_socket, address = global_socket.accept()
@@ -71,7 +68,6 @@ def receive_monitor_data():
 # Function to send a container request to a particular host
 
 
-#def send_container_request(request, address):
 def send_container_request(request, hostname):
 	config = ConfigParser()
 	config.read('./config/global-config.txt')
@@ -143,13 +139,14 @@ def recvall(temp_socket, n):
 
 # Conn Thread
 
+
 def receive_thread(connection, entry_queue: Queue):
 	data = b''
 	container = None
 	config = ConfigParser()
 	config.read('./config/local-config.txt')
 
-	data = connection.recv(1024)
+	data = connection.recv(2048)
 	container = dill.loads(data)
 	connection.close()
 
@@ -160,6 +157,4 @@ def receive_thread(connection, entry_queue: Queue):
 		if config['Container']['type'] == 'LXC':
 			container.createContainer()
 
-	entry_list = entry_queue.get()
-	entry_list.append(container)
-	entry_queue.put(entry_list)
+	entry_queue.put(container)

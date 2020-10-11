@@ -7,6 +7,7 @@ from datetime import datetime
 from classes.host import Host
 from configparser import ConfigParser
 from threading import Thread
+import multiprocessing as mp
 
 
 parser = ConfigParser()
@@ -18,179 +19,149 @@ if parser['Container']['type'] == 'DOCKER':
 elif parser['Container']['type'] == 'LXC':
 	from classes.container import ContainerLXC as Container
 
+log_plc = logging.getLogger('Container_Manager.Policies')
+
 
 # ---------- Global Scheduling Policies ----------
 
 
-def global_scheduler_policy(host_list, req_list, new_list): # Em dev
-    used_hosts = []
-    if host_list:
-        for request in new_list:
-            app = database.get_application_from_ID(request.application)
-            found = functions.request_bin_packing(host_list, used_hosts, request, app)
+def global_scheduler_policy(host_list, req_list, new_list):
+	used_hosts = []
 
-            if found:
-                if request.status == 'QUEUED':
-                    request.status = 'SCHEDULED'
-                    database.update_request_status(request.reqid, request.status)
-                    req_list.append(request)
-                    new_list.remove(request)
+	if host_list:
+		for request in new_list:
+			app = database.get_application_from_ID(request.application)
+			found = functions.request_bin_packing(host_list, used_hosts, request, app)
 
-        if not new_list:
-            logging.debug('All Requests are Scheduled')
-    else:
-        logging.debug('No Hosts Available for Scheduling')
+			if found:
+				if request.status == 'QUEUED':
+					request.status = 'SCHEDULED'
+					database.update_request_status(request.reqid, request.status)
+					req_list.append(request)
+					new_list.remove(request)
+
+		if not new_list:
+			logging.debug('All Requests are Scheduled')
+
+	else:
+		logging.debug('No Hosts Available for Scheduling')
 
 
 # ---------- Local Scaling Policies ----------
+
 # Start Container Policy
+# - Only starts the queued containers
+
+def start_container_policy(host: Host, NAHM):
+	sorted_list = sorted(host.container_inactive_list, key=lambda container: container.getInactiveTime(), reverse=True)
+	index = 0
+
+	while(NAHM > 0) and (index < len(sorted_list)):
+		container = sorted_list[index]
+
+		if (container.getContainerState() == 'QUEUED'):
+
+			if (container.getMinMemoryLimitPG() <= NAHM) and (host.has_free_cores() >= container.request_cpus):
+				cpu_allocation = host.get_available_cores(container.request_cpus)
+
+				if parser['Container']['type'] == 'LXC':
+					container.startContainer()
+					container.setMemLimit2(container.getMinMemoryLimitPG())
+					container.setCPUCores(cpu_allocation)
+
+				elif parser['Container']['type'] == 'DOCKER':
+					swap = container.getMaxMemoryLimit() + psutil.swap_memory().total
+					container.startContainer(memory_limit=container.request_mem, swap_limit=swap, cpuset=cpu_allocation)
+
+				host.container_active_list.append(container)
+				host.container_inactive_list.remove(container)
+
+				logging.info('Container %s moved during Start from Inactive -> Active with status %s.', container.name, container.state)
+
+				container.inactive_time = 0
+				NAHM -= container.getMemoryLimitPG()
+				logging.info('new NAHM\u2193: %d', NAHM)
+
+		index += 1
 
 
-def start_container_policy(host, free_mem): #Em dev
-    sorted_list = sorted(host.container_inactive_list, key=lambda container: container.start_time, reverse=True)
-    print('Lista Ordenada:', sorted_list)
+def start_all_containers(host: Host):
+	sorted_list = sorted(host.container_inactive_list, key=lambda container: container.getInactiveTime(), reverse=True)
+	index = 0
 
-    for container in sorted_list:
-        if (container.state == 'SUSPENDED'):
-            if(container.mem_limit < free_mem):
-                print('Restart container %s', container.name)
+	while (index < len(sorted_list)):
+		container = sorted_list[index]
+		print('Container:', container.name, 'State:', container.state)
 
-        elif (container.state in ['CREATED', 'NEW']):
-            cpu_allocation = host.get_available_cores(container.request_cpus)
-            swap = container.request_mem + psutil.swap_memory().total
+		if (container.getContainerState() == 'QUEUED'):
 
-            if(cpu_allocation != '') and (container.request_mem <= free_mem):
-                if parser['Container']['type'] == 'LXC':
-                    container.startContainer()
-                    container.setMemLimit(str(container.request_mem), str(swap))
-                    container.setCPUCores(cpu_allocation)
+			if (host.has_free_cores() >= container.request_cpus):
+				cpu_allocation = host.get_available_cores(container.request_cpus)
 
-                elif parser['Container']['type'] == 'DOCKER':
-                    container.startContainer(memory_limit=container.request_mem, swap_limit=swap, cpuset=cpu_allocation)
+				if parser['Container']['type'] == 'LXC':
+					container.startContainer()
+					container.setMemLimit2(container.getMinMemoryLimitPG())
+					container.setCPUCores(cpu_allocation)
 
-                host.container_active_list.append(container)
-                host.container_inactive_list.remove(container)
-                free_mem -= container.request_mem
+				elif parser['Container']['type'] == 'DOCKER':
+					swap = container.getMinMemoryLimit() + psutil.swap_memory().total
+					container.startContainer(memory_limit=container.request_mem, swap_limit=swap, cpuset=cpu_allocation)
 
+				host.container_active_list.append(container)
+				host.container_inactive_list.remove(container)
+				container.inactive_time = 0
+				log_plc.info('Container %s moved during Start from Inactive -> Active with status %s.', container.name, container.state)
 
-# MEC Like Memory Scaling Policy V1
-
-
-def memory_shaping_policy(host, free_mem):
-    for container in host.container_active_list:
-        if (container.state == 'RUNNING'):
-            delta, delta_swap = database.get_container_memory_consumption(container.name, 10)
-            threshold = ((container.getUsedMemory() + delta) * 100) // container.mem_limit
-            print('Threshold: ', threshold)
-
-            if (delta > 0):
-                if(threshold > 100) and (delta < free_mem):
-                    logging.info('Container %s Delta: %d', container.name, delta)
-                    container.setMemLimit(limit=str(container.mem_limit + delta), swap=str(container.mem_swap_limit + delta))
-                    free_mem -= delta
-
-            elif (delta < 0):
-                logging.info('Container %s Delta: %d', container.name, delta)
-                container.setMemLimit(limit=str(container.mem_limit + delta), swap=str(container.mem_swap_limit + delta))
-                free_mem += delta
-
-            else:
-                print('Memory Consumable is Stable!')
-
-    return free_mem
+		index += 1
 
 
-# MEC Like Memory Scaling Policy V2
+# Suspended Policy
 
 
-def memory_shaping_policy_V2(host: Host):  # Em Dev
-	need_list = []
-	limited_list = []
-	stable_list = []
-	mem_need = 0
-	mem_limited_need = 0
-	available_limit = host.get_available_limit()
-
-	# Calculate memory consumption based in the historical info window, categorize the memory comportament and organize in lists
-
+def suspend_pressure_policy(host: Host):
 	for container in host.container_active_list:
-		if (container.state == 'RUNNING'):
-			consumption = database.get_container_memory_consumption2(container.name, 10)
+		if(container.state == 'RUNNING') and (not container.mem_steal_check):
+			if container.getUsedMemory() >= container.getMaxMemoryLimit():
+				container.setContainerState('SUSPENDING')
+				core_list = container.cpu_set.split()
 
-			if (consumption['memory'] > 0) or (consumption['swap'] > 0):
-				if (container.mem_state != 'RISING'):
-					container.mem_state = 'RISING'
-					container.mem_state_time = datetime.now()
+				for core in core_list:
+					host.core_allocation[int(core)] = False
 
-				if container.mem_state == 'RISING':
-					delta = consumption['memory'] + consumption['swap']
-					need_list.append({'container': container, 'delta': delta})
-					mem_need += delta
-
-					if(consumption['major_faults'] > 0):
-						delta = (consumption['page_faults'] + consumption['major_faults']) * mmap.PAGESIZE
-						limited_list.append({'container': container, 'delta': delta})
-						mem_limited_need += delta
-
-			elif (consumption['memory'] < 0):
-				if (container.mem_state != 'FALLING'):
-					container.mem_state = 'FALLING'
-					container.mem_state_time = datetime.now()
-
-				if (container.mem_state == 'FALLING') and (container.getMemoryStateTime > 10):
-					if container.getMemoryThreshold() <= 50:
-						delta = container.mem_limit // 4
-						container.setMemLimit(limit=str(container.mem_limit - delta), swap=str(container.mem_swap_limit - delta))
-						available_limit += delta
-
-			else:
-				if (consumption['swap'] <= 0) and (consumption['major_faults'] == 0):
-					if (container.mem_state != 'STABLE'):
-						container.mem_state = 'STABLE'
-						container.mem_state_time = datetime.now()
-
-					if (container.state == 'STABLE') and (container.getMemoryStateTime > 10):
-						stable_list.append(container)
-
-	# Distribute memory over the containers if the request is lower than the available memory limit
-
-	if mem_need <= available_limit:
-		for item in need_list:
-			container = item['container']
-			delta = item['delta']
-			container.setMemLimit(limit=str(container.mem_limit + delta), swap=str(container.mem_swap_limit + delta))
-			available_limit -= delta
-
-	elif mem_limited_need <= available_limit:
-		for item in limited_list:
-			container = item['container']
-			delta = item['delta']
-			container.setMemLimit(limit=str(container.mem_limit + delta), swap = str(container.mem_swap_limit + delta))
-			available_limit -= delta
-
-	else:
-		print('Critical State 1: Needs Some Recover')
-
-	# Activate recover memory policy from stable
-
-	if available_limit <= 0:
-		if stable_list:
-			recover = 0
-			for container in stable_list:
-				delta = int(container.mem_stats['inactive_anon'])
-
-				if delta > 0:
-					container.setMemLimit(limit=str(container.mem_limit - delta), swap=str(container.mem_swap_limit - delta))
-					recover += delta
-
-		else:
-			print('Critical State 2: Suspend a Container')
+				container.inactive_time = datetime.now()
+				host.container_inactive_list.append(container)
+				host.container_active_list.remove(container)
+				print('Suspending container:', container.name)
+				container.mem_steal_check = True
+				#Thread(target = container.suspendContainer, daemon=True).start()
+				ctx = mp.get_context('spawn')
+				proc = ctx.Process(target=container.suspendContainer)
+				proc.start()
+				log_plc.info('Container %s moved during Suspension from Active -> Inactive with status %s.', container.name, container.state)
 
 
-# V3
+def resume_policy(host: Host):
+	for container in host.container_inactive_list:
+		if (container.state == 'SUSPENDED'):
+			if (container.getMemoryState() == 'STEAL') and (container.getMemoryStateTime() > 10):
+				if (host.has_free_cores() >= container.request_cpus):
+					cpu_allocation = host.get_available_cores(container.request_cpus)
+					container.setContainerState('RESUMING')
+					host.container_active_list.append(container)
+					host.container_inactive_list.remove(container)
+					container.inactive_time = 0
+					print('Resuming container:', container.name)
+					#Thread(target=container.resumeContainer, args=(cpu_allocation,), daemon=True).start()
+					ctx = mp.get_context('spawn')
+					proc = ctx.Process(target=container.resumeContainer, args=(cpu_allocation,))
+					proc.start()
+					log_plc.info('Container %s moved during Resume from Inactive -> Active with status %s.', container.name, container.state)
 
 
-def memory_shaping_policy_V3(host: Host):  # Em Dev
+# MEC Like Memory Scaling Policy
+
+
+def memory_shaping_policy(host: Host):
 	need_list = []
 	urgent_list = []
 	stable_list = []
@@ -234,7 +205,6 @@ def memory_shaping_policy_V3(host: Host):  # Em Dev
 				if container.getMemoryStateTime() > 10:
 					stable_list.append(container)
 					logging.info('Stable Container: %s, Using: %d, Limit: %d', container.name, mem_used, mem_limit)
-
 
 	# First Recover:
 	# Recover some memory from FALLING and STABLE containers with Threshold less than 90%
@@ -400,56 +370,61 @@ def memory_shaping_policy_V3(host: Host):  # Em Dev
 						print('Available: ', available_limit, flush=True)
 
 			index += 1
-	#else:
-	#	print('Migration policy here')
 
 
 # Elastic Docker Like Memory Scaling Policy
 
 
 def ED_policy(host, free_mem, cooldown_list):
-    for container in host.container_active_list:
-        if (container.state == 'RUNNING'):
-            check = False
-            cooldown = next((item for item in cooldown_list if item['name'] == container.name), None)
 
-            if(not cooldown):
-                check = True
-            elif((cooldown['breath'] == 'UP') and ((datetime.now() - cooldown['last_time']).seconds > 10)):
-                check = True
-            elif((cooldown['breath'] == 'DOWN') and ((datetime.now() - cooldown['last_time']).seconds > 20)):
-                check = True
+	for container in host.container_active_list:
 
-            if check:
-                media = database.get_container_memory_consumption_ED(container.name, 10)
-                threshold = (media * 100) // container.mem_limit
-                print('Threshold: ', threshold)
-                breath = ''
+		if (container.state == 'RUNNING'):
+			check = False
+			cooldown = next((item for item in cooldown_list if item['name'] == container.name), None)
 
-                if (threshold > 90):
-                    delta = 256 * (2 ** 20)
-                    logging.info('Container %s Delta: %d', container.name, delta)
-                    container.setMemLimit(limit=str(container.mem_limit + delta), swap=str(container.mem_swap_limit + delta))
-                    breath = 'UP'
-                    free_mem -= delta
+			if(not cooldown):
+				check = True
 
-                elif (threshold < 70):
-                    delta = 128 * (2 ** 20)
-                    logging.info('Container %s Delta: %d', container.name, delta)
-                    container.setMemLimit(limit=str(container.mem_limit - delta), swap=str(container.mem_swap_limit - delta))
-                    breath = 'DOWN'
-                    free_mem -= delta
+			elif((cooldown['breath'] == 'UP') and ((datetime.now() - cooldown['last_time']).seconds > 10)):
+				check = True
 
-                print('Breath:' + breath)
-                if (breath != ''):
-                    if cooldown:
-                        cooldown['breath'] = breath
-                        cooldown['last_time'] = datetime.now()
-                    else:
-                        cooldown = {'name':container.name, 'breath':breath, 'last_time':datetime.now()}
-                        cooldown_list.append(cooldown)
-                else:
-                    if cooldown:
-                        cooldown_list.remove(cooldown)
+			elif((cooldown['breath'] == 'DOWN') and ((datetime.now() - cooldown['last_time']).seconds > 20)):
+				check = True
 
-    return free_mem
+			if check:
+				media = database.get_container_memory_consumption_ED(container.name, 10)
+				threshold = (media * 100) // container.mem_limit
+				print('Threshold: ', threshold)
+				breath = ''
+
+				if (threshold > 90):
+					delta = 256 * (2 ** 20)
+					logging.info('Container %s Delta: %d', container.name, delta)
+					container.setMemLimit(limit=str(container.mem_limit + delta), swap=str(container.mem_swap_limit + delta))
+					breath = 'UP'
+					free_mem -= delta
+
+				elif (threshold < 70):
+					delta = 128 * (2 ** 20)
+					logging.info('Container %s Delta: %d', container.name, delta)
+					container.setMemLimit(limit=str(container.mem_limit - delta), swap=str(container.mem_swap_limit - delta))
+					breath = 'DOWN'
+					free_mem -= delta
+
+				print('Breath:' + breath)
+
+				if (breath != ''):
+					if cooldown:
+						cooldown['breath'] = breath
+						cooldown['last_time'] = datetime.now()
+
+					else:
+						cooldown = {'name':container.name, 'breath':breath, 'last_time':datetime.now()}
+						cooldown_list.append(cooldown)
+
+				else:
+					if cooldown:
+						cooldown_list.remove(cooldown)
+
+	return free_mem
