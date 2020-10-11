@@ -6,8 +6,8 @@ local_receive_port = 8600
 
 [Localbase]
 hostname = localhost
-#database = localbase
-database = tempbase
+database = localbase
+#database = tempbase
 user = userdb
 password = bdresu
 
@@ -23,4 +23,16 @@ memory = 2147483648
 path = /tmp
 
 [Container]
+#Container Technology Support [DOCKER, LXC]
 type = LXC
+#Initial Container Memory Limit in bytes
+initial_memory_limit = 536870912
+
+[Scheduler]
+sched_interval = 6
+#Memory Usage Efficiency: float value between 0 and 1
+MUE = 0.998
+
+[QoS]
+#Level: BEST, FAIR or GUARANTEED
+level = BEST

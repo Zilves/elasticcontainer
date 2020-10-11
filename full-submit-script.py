@@ -93,7 +93,27 @@ def requestMenu(session):
         request.name = input('Enter Request Name: ')
         request.user = session.uid
         request.num_containers = int(input('Enter the Number of Containers: '))
-        request.listcontainers = containerMenu(session, request.num_containers)
+
+        print("""
+        1. Executing equal jobs?
+        2. Executing different jobs?
+        3. Exit
+        """)
+        menu2 = input('Enter the Selected Option: ')
+
+        if menu2 == '1':
+            request.listcontainers = containerMenuType2(session, request.num_containers)
+
+        elif menu2 == '2':
+            request.listcontainers = containerMenuType1(session, request.num_containers)
+
+        elif menu2 == '3':
+            print('Get Out...')
+            sys.exit()
+
+        else:
+            print('Invalid Option!')
+
         session.reqid = database.create_request(request)
 
         print('Request ID: ', session.reqid)
@@ -111,9 +131,9 @@ def requestMenu(session):
     else:
         print('Invalid Option!')
 
-
-def containerMenu(session, qtd_containers):
+def containerMenuType1(session, qtd_containers):
     container_list = []
+    print('Containers with different jobs')
 
     for i in range(qtd_containers):
         print('\n' + 'Container:', i)
@@ -126,6 +146,27 @@ def containerMenu(session, qtd_containers):
         # database.create_container(session.reqid, appid, name, command, est_time)
 
     return container_list
+
+def containerMenuType2(session, qtd_containers):
+    container_list = []
+    print('Containers with equal jobs')
+
+    appid = applicationMenu()
+    command = input('Enter Needed Execution Command: ')
+    estimated_time = timedelta(seconds = int(input('Enter Stimated Execution Time in seconds: ')))
+    print('Estimated Time = ', estimated_time)
+
+    for i in range(qtd_containers):
+        print('\n' + 'Container:', i)
+        container = Container()
+        container.appid = appid
+        container.command = command
+        container.estimated_time = estimated_time
+        container_list.append(container)
+        # database.create_container(session.reqid, appid, name, command, est_time)
+
+    return container_list
+
 
 # ----------- Script Principal ----------
 
